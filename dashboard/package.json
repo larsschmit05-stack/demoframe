@@ -14,8 +14,8 @@
     "next": "^14.2",
     "react": "^18",
     "react-dom": "^18",
-    "rrweb": "^2.0.0-alpha.4",
-    "rrweb-player": "^1.0.0-alpha.4",
+    "rrweb": "^2.0.0-alpha.13",
+    "rrweb-player": "^2.0.0-alpha.13",
     "stripe": "^15.0"
   },
   "devDependencies": {
