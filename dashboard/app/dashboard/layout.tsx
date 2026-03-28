@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import SidebarNav from '@/components/SidebarNav';
+import ExtensionBridge from '@/components/ExtensionBridge';
 
 export default async function DashboardLayout({
   children,
@@ -13,6 +14,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen">
+      <ExtensionBridge />
       <aside className="w-64 flex-shrink-0 border-r border-gray-200 bg-gray-50 p-6 flex flex-col">
         <h2 className="text-lg font-bold mb-6">DemoFrame</h2>
         <SidebarNav userEmail={user?.email ?? ''} />
