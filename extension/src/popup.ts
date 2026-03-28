@@ -56,6 +56,8 @@ function connectToBackground(): void {
         state.paused = false;
         state.hasRecording = true;
         renderUI();
+        // Auto-upload if auth token is available
+        uploadRecording();
         break;
 
       case 'SIZE_WARNING':
@@ -126,6 +128,72 @@ async function exportRecording(): Promise<void> {
   }
 }
 
+async function uploadRecording(): Promise<void> {
+  try {
+    state.error = null;
+    renderUI();
+
+    const result = await chrome.storage.local.get('lastRecording');
+    if (!result.lastRecording) {
+      state.error = 'No recording found to upload.';
+      renderUI();
+      return;
+    }
+
+    // Get auth token from storage
+    const tokenResult = await chrome.storage.local.get('supabaseToken');
+    if (!tokenResult.supabaseToken) {
+      state.error = 'Not authenticated. Please visit the dashboard to authenticate.';
+      renderUI();
+      return;
+    }
+
+    state.error = 'Uploading...';
+    renderUI();
+
+    const recording = result.lastRecording;
+    const response = await fetch('http://localhost:3000/api/recordings/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${tokenResult.supabaseToken}`,
+      },
+      body: JSON.stringify({
+        name: recording.title || `Recording ${new Date().toLocaleString()}`,
+        app_url: recording.url || 'Unknown',
+        recording_data: recording,
+        metadata: recording.metadata || {},
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      if (response.status === 402) {
+        state.error = `Recording limit reached. ${errorData.error}`;
+      } else {
+        state.error = errorData.error || `Upload failed: ${response.statusText}`;
+      }
+      renderUI();
+      return;
+    }
+
+    state.error = null;
+    state.hasRecording = false;
+    await chrome.storage.local.remove('lastRecording');
+    renderUI();
+
+    // Brief success message
+    const successMsg = document.createElement('div');
+    successMsg.textContent = '✓ Uploaded successfully!';
+    successMsg.style.cssText = 'position: fixed; top: 10px; left: 10px; background: #22c55e; color: white; padding: 8px 12px; border-radius: 4px; z-index: 9999;';
+    document.body.appendChild(successMsg);
+    setTimeout(() => successMsg.remove(), 3000);
+  } catch (err) {
+    state.error = `Upload failed: ${err}`;
+    renderUI();
+  }
+}
+
 // ── Render ─────────────────────────────────────────────────────────
 
 function renderUI(): void {
@@ -134,6 +202,7 @@ function renderUI(): void {
   const primaryBtn = $('primary-btn') as HTMLButtonElement;
   const stopBtn = $('stop-btn') as HTMLButtonElement;
   const exportBtn = $('export-btn') as HTMLButtonElement;
+  const uploadBtn = $('upload-btn') as HTMLButtonElement;
   const stats = $('stats');
   const errorEl = $('error');
 
@@ -177,6 +246,9 @@ function renderUI(): void {
   // Export button
   exportBtn.style.display = state.hasRecording && !state.recording ? 'block' : 'none';
 
+  // Upload button
+  uploadBtn.style.display = state.hasRecording && !state.recording ? 'block' : 'none';
+
   // Error
   if (state.error) {
     errorEl.textContent = state.error;
@@ -208,6 +280,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Wire up buttons
   $('stop-btn').onclick = stopRecording;
   $('export-btn').onclick = exportRecording;
+  $('upload-btn').onclick = uploadRecording;
 
   renderUI();
 });

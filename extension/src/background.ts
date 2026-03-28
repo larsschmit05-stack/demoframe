@@ -271,6 +271,25 @@ async function stopRecording(): Promise<void> {
   }
 }
 
+// ── Auth Token Management ─────────────────────────────────────────
+
+// Listen for auth token from dashboard or popup
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  if (message.type === 'SET_AUTH_TOKEN') {
+    chrome.storage.local.set({ supabaseToken: message.token }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
+  if (message.type === 'GET_AUTH_TOKEN') {
+    chrome.storage.local.get('supabaseToken', (result) => {
+      sendResponse({ token: result.supabaseToken || null });
+    });
+    return true;
+  }
+});
+
 // ── Init ───────────────────────────────────────────────────────────
 
 loadState();
