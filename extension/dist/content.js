@@ -12401,6 +12401,7 @@ function initRecording() {
     recordCanvas: false,
     inlineImages: true,
     emit(event) {
+      if (!sizeGuard) return;
       const shouldContinue = sizeGuard.addEvent(event);
       if (!shouldContinue) return;
       events.push(event);
@@ -12427,6 +12428,7 @@ function resumeRecording() {
     recordCanvas: false,
     inlineImages: true,
     emit(event) {
+      if (!sizeGuard) return;
       const shouldContinue = sizeGuard.addEvent(event);
       if (!shouldContinue) return;
       events.push(event);
@@ -12504,5 +12506,25 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 );
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.data.type === "DEMOFRAME_SEND_TOKEN" && event.data.token) {
+    chrome.runtime.sendMessage(
+      {
+        type: "SET_AUTH_TOKEN",
+        token: event.data.token
+      },
+      () => {
+        window.postMessage(
+          {
+            type: "DEMOFRAME_TOKEN_STORED",
+            ok: true
+          },
+          "*"
+        );
+      }
+    );
+  }
+});
 console.log("[Demoframe] Content script loaded");
 //# sourceMappingURL=content.js.map

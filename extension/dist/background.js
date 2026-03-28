@@ -190,6 +190,20 @@ async function stopRecording() {
     });
   }
 }
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "SET_AUTH_TOKEN") {
+    chrome.storage.local.set({ supabaseToken: message.token }, () => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+  if (message.type === "GET_AUTH_TOKEN") {
+    chrome.storage.local.get("supabaseToken", (result) => {
+      sendResponse({ token: result.supabaseToken || null });
+    });
+    return true;
+  }
+});
 loadState();
 console.log("[Demoframe] Background service worker loaded");
 //# sourceMappingURL=background.js.map
