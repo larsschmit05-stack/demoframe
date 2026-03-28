@@ -2,6 +2,14 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function updateSession(request: NextRequest) {
+  // Skip auth for public embed routes
+  if (
+    request.nextUrl.pathname.startsWith('/embed') ||
+    request.nextUrl.pathname.startsWith('/api/embed')
+  ) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });

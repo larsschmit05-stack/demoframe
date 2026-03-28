@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { STORAGE_BUCKET } from '@/lib/constants';
 import RecordingMetadata from '@/components/recordings/RecordingMetadata';
 import RecordingActions from '@/components/recordings/RecordingActions';
@@ -38,7 +39,10 @@ export default async function RecordingDetailPage({
     notFound();
   }
 
-  const { data: signedUrlData } = await supabase.storage
+  // Use service client for signed URL — user-session client can't read storage
+  // due to storage RLS policy checking wrong path segment
+  const serviceClient = createServiceClient();
+  const { data: signedUrlData } = await serviceClient.storage
     .from(STORAGE_BUCKET)
     .createSignedUrl(recording.storage_path, 300);
 

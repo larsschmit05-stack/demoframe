@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import CopyButton from '@/components/ui/CopyButton';
 import DeleteRecordingDialog from './DeleteRecordingDialog';
+import EmbedSnippetDialog from './EmbedSnippetDialog';
 import type { Recording } from '@/lib/types';
 
 export default function RecordingActions({
@@ -15,6 +16,7 @@ export default function RecordingActions({
   const [isRenaming, setIsRenaming] = useState(false);
   const [name, setName] = useState(recording.name);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [embedOpen, setEmbedOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -82,6 +84,16 @@ export default function RecordingActions({
         <CopyButton text={shareUrl} label="Copy Share Link" />
 
         <button
+          onClick={() => setEmbedOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+          </svg>
+          Embed Code
+        </button>
+
+        <button
           onClick={handleToggleActive}
           className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
         >
@@ -103,6 +115,12 @@ export default function RecordingActions({
         recording={recording}
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
+      />
+
+      <EmbedSnippetDialog
+        open={embedOpen}
+        onClose={() => setEmbedOpen(false)}
+        recordingId={recording.id}
       />
     </>
   );
