@@ -1,0 +1,23 @@
+{
+  "name": "demoframe-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Record interactive demos of your app",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "rrweb": "^2.0.0-alpha.17"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.0",
+    "vite-plugin-static-copy": "^1.0.6",
+    "vitest": "^2.0.0"
+  }
+}
