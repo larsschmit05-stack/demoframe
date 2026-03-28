@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f9fafb"/>
+  <rect x="0" y="0" width="1200" height="4" fill="#000"/>
+  <text x="600" y="290" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="#111827">DemoFrame</text>
+  <text x="600" y="350" font-family="system-ui, -apple-system, sans-serif" font-size="24" text-anchor="middle" fill="#6b7280">Interactive Demo</text>
+</svg>
