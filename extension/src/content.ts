@@ -183,7 +183,8 @@ function initRecording(): void {
     recordCanvas: false,
     inlineImages: true,
     emit(event: eventWithTime) {
-      const shouldContinue = sizeGuard!.addEvent(event);
+      if (!sizeGuard) return;
+      const shouldContinue = sizeGuard.addEvent(event);
       if (!shouldContinue) return;
 
       events.push(event);
@@ -215,7 +216,8 @@ function resumeRecording(): void {
     recordCanvas: false,
     inlineImages: true,
     emit(event: eventWithTime) {
-      const shouldContinue = sizeGuard!.addEvent(event);
+      if (!sizeGuard) return;
+      const shouldContinue = sizeGuard.addEvent(event);
       if (!shouldContinue) return;
 
       events.push(event);
@@ -312,6 +314,33 @@ chrome.runtime.onMessage.addListener(
     return true;
   },
 );
+
+// ── Dashboard Integration ──────────────────────────────────────────
+// Listen for messages from dashboard window.postMessage API
+window.addEventListener('message', (event) => {
+  // Only accept messages from the same window
+  if (event.source !== window) return;
+
+  if (event.data.type === 'DEMOFRAME_SEND_TOKEN' && event.data.token) {
+    // Store token in extension storage
+    chrome.runtime.sendMessage(
+      {
+        type: 'SET_AUTH_TOKEN',
+        token: event.data.token,
+      },
+      () => {
+        // Send confirmation back to dashboard
+        window.postMessage(
+          {
+            type: 'DEMOFRAME_TOKEN_STORED',
+            ok: true,
+          },
+          '*'
+        );
+      }
+    );
+  }
+});
 
 // Signal that content script is loaded
 console.log('[Demoframe] Content script loaded');
