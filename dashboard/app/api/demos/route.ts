@@ -1,5 +1,27 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
+
+/**
+ * Authenticate via Bearer token (extension) or cookie session (dashboard).
+ * Returns the authenticated user or null.
+ */
+async function authenticateRequest(request: Request) {
+  const authHeader = request.headers.get('Authorization');
+
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.replace('Bearer ', '');
+    const supabase = createServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return { user: null, supabase };
+    return { user, supabase };
+  }
+
+  const supabase = createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return { user: null, supabase };
+  return { user, supabase };
+}
 
 export async function GET() {
   try {
@@ -46,14 +68,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const supabase = createClient();
+    const { user, supabase } = await authenticateRequest(request);
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
