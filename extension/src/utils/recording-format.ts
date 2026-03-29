@@ -1,61 +1,43 @@
-import type { eventWithTime } from 'rrweb';
+// ── Snapshot Format (replaces rrweb recording format) ─────────────
 
 export interface InteractiveElement {
   selector: string;
   tag: string;
-  type: 'button' | 'link' | 'input' | 'select' | 'toggle' | 'other';
+  type: 'button' | 'link' | 'input' | 'select' | 'toggle' | 'tab' | 'other';
   text: string;
   rect: { x: number; y: number; width: number; height: number } | null;
-  source: 'static-scan' | 'click';
 }
 
-export interface DemoframeRecording {
-  version: '0.1.0';
-  url: string;
-  title: string;
+export interface ScreenSnapshot {
+  name: string;
+  sourceUrl: string;
+  html: string;
   viewport: { width: number; height: number };
-  recordedAt: string;
-  duration: number;
-  events: eventWithTime[];
   interactiveElements: InteractiveElement[];
+  capturedAt: string;
+  sizeBytes: number;
+}
+
+export interface DemoCapture {
+  version: '0.2.0';
+  screens: ScreenSnapshot[];
+  appUrl: string;
   metadata: {
-    eventCount: number;
-    elementCount: number;
-    sizeBytes: number;
+    screenCount: number;
+    totalSizeBytes: number;
   };
 }
 
-export function buildRecording(
-  events: eventWithTime[],
-  interactiveElements: InteractiveElement[],
-  url: string,
-  title: string,
-): DemoframeRecording {
-  const firstTimestamp = events.length > 0 ? events[0].timestamp : Date.now();
-  const lastTimestamp = events.length > 0 ? events[events.length - 1].timestamp : Date.now();
+export function buildDemoCapture(screens: ScreenSnapshot[]): DemoCapture {
+  const totalSize = screens.reduce((sum, s) => sum + s.sizeBytes, 0);
 
-  const recording: DemoframeRecording = {
-    version: '0.1.0',
-    url,
-    title,
-    viewport: {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    },
-    recordedAt: new Date(firstTimestamp).toISOString(),
-    duration: lastTimestamp - firstTimestamp,
-    events,
-    interactiveElements,
+  return {
+    version: '0.2.0',
+    screens,
+    appUrl: screens.length > 0 ? new URL(screens[0].sourceUrl).origin : '',
     metadata: {
-      eventCount: events.length,
-      elementCount: interactiveElements.length,
-      sizeBytes: 0,
+      screenCount: screens.length,
+      totalSizeBytes: totalSize,
     },
   };
-
-  // Calculate approximate size
-  const json = JSON.stringify(recording);
-  recording.metadata.sizeBytes = new Blob([json]).size;
-
-  return recording;
 }

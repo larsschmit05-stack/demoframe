@@ -1,11 +1,11 @@
 let state = {
-  recording: false,
-  paused: false,
-  eventCount: 0,
-  elementCount: 0,
-  estimatedSize: 0,
-  hasRecording: false,
-  error: null
+  screenCount: 0,
+  capturing: false,
+  demoName: "",
+  appUrl: "",
+  screensMeta: [],
+  error: null,
+  progressText: null
 };
 let port = null;
 function $(id) {
@@ -16,37 +16,43 @@ function connectToBackground() {
   port.onMessage.addListener((msg) => {
     switch (msg.type) {
       case "STATE_SYNC":
-        state.recording = msg.recording ?? false;
-        state.paused = msg.paused ?? false;
-        state.eventCount = msg.eventCount ?? 0;
-        state.elementCount = msg.elementCount ?? 0;
-        state.estimatedSize = msg.estimatedSize ?? 0;
+        state.screenCount = msg.screenCount ?? 0;
+        state.capturing = msg.capturing ?? false;
+        state.demoName = msg.demoName ?? "";
+        state.appUrl = msg.appUrl ?? "";
+        state.screensMeta = msg.screensMeta ?? [];
         renderUI();
         break;
-      case "STATUS_UPDATE":
-        state.eventCount = msg.eventCount ?? state.eventCount;
-        state.elementCount = msg.elementCount ?? state.elementCount;
-        state.estimatedSize = msg.estimatedSize ?? state.estimatedSize;
+      case "SCREEN_CAPTURED":
+        state.capturing = false;
+        state.error = null;
+        state.progressText = null;
         renderUI();
         break;
-      case "RECORDING_SAVED":
-        state.recording = false;
-        state.paused = false;
-        state.hasRecording = true;
-        renderUI();
-        uploadRecording();
-        break;
-      case "SIZE_WARNING":
-        state.error = `Recording is large (${formatBytes(msg.sizeBytes)}). Consider stopping soon.`;
+      case "CAPTURE_PROGRESS":
+        state.progressText = `Capturing: ${msg.phase}${msg.detail ? ` - ${msg.detail}` : ""}...`;
         renderUI();
         break;
-      case "SIZE_LIMIT_REACHED":
-        state.error = "Size limit reached. Recording auto-stopped.";
-        state.recording = false;
-        state.paused = false;
+      case "UPLOAD_STARTED":
+        state.progressText = `Uploading... (0/${msg.totalScreens} screens)`;
         renderUI();
+        break;
+      case "UPLOAD_PROGRESS":
+        state.progressText = `Uploading... (${msg.currentScreen}/${msg.totalScreens}) ${msg.screenName}`;
+        renderUI();
+        break;
+      case "UPLOAD_COMPLETE":
+        state.progressText = null;
+        state.error = null;
+        state.screenCount = 0;
+        state.screensMeta = [];
+        state.demoName = "";
+        renderUI();
+        showSuccess(`Demo "${msg.demoName}" uploaded!`);
         break;
       case "ERROR":
+        state.capturing = false;
+        state.progressText = null;
         state.error = msg.error;
         renderUI();
         break;
@@ -56,136 +62,82 @@ function connectToBackground() {
     port = null;
   });
 }
-function startRecording() {
+function captureScreen() {
   state.error = null;
-  port?.postMessage({ type: "START_RECORDING" });
+  state.progressText = "Starting capture...";
+  renderUI();
+  port?.postMessage({ type: "CAPTURE_SCREEN" });
 }
-function pauseRecording() {
-  port?.postMessage({ type: "PAUSE_RECORDING" });
+function removeScreen(index) {
+  port?.postMessage({ type: "REMOVE_SCREEN", index });
 }
-function resumeRecording() {
-  port?.postMessage({ type: "RESUME_RECORDING" });
-}
-function stopRecording() {
-  port?.postMessage({ type: "STOP_RECORDING" });
-}
-async function exportRecording() {
-  try {
-    const result = await chrome.storage.local.get("lastRecording");
-    if (!result.lastRecording) {
-      state.error = "No recording found to export.";
-      renderUI();
-      return;
-    }
-    const json = JSON.stringify(result.lastRecording, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `demoframe-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    state.error = `Export failed: ${err}`;
-    renderUI();
+function finishAndUpload() {
+  const nameInput = $("demo-name");
+  const name = nameInput.value.trim();
+  if (name) {
+    port?.postMessage({ type: "SET_DEMO_NAME", name });
   }
+  port?.postMessage({ type: "FINISH_DEMO" });
 }
-async function uploadRecording() {
-  try {
-    state.error = null;
-    renderUI();
-    const result = await chrome.storage.local.get("lastRecording");
-    if (!result.lastRecording) {
-      state.error = "No recording found to upload.";
-      renderUI();
-      return;
-    }
-    const tokenResult = await chrome.storage.local.get("supabaseToken");
-    if (!tokenResult.supabaseToken) {
-      state.error = "Not authenticated. Please visit the dashboard to authenticate.";
-      renderUI();
-      return;
-    }
-    state.error = "Uploading...";
-    renderUI();
-    const recording = result.lastRecording;
-    const response = await fetch("http://localhost:3000/api/recordings/upload", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${tokenResult.supabaseToken}`
-      },
-      body: JSON.stringify({
-        name: recording.title || `Recording ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
-        app_url: recording.url || "Unknown",
-        recording_data: recording,
-        metadata: recording.metadata || {}
-      })
-    });
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-      if (response.status === 402) {
-        state.error = `Recording limit reached. ${errorData.error}`;
-      } else {
-        state.error = errorData.error || `Upload failed: ${response.statusText}`;
-      }
-      renderUI();
-      return;
-    }
-    state.error = null;
-    state.hasRecording = false;
-    await chrome.storage.local.remove("lastRecording");
-    renderUI();
-    const successMsg = document.createElement("div");
-    successMsg.textContent = "\u2713 Uploaded successfully!";
-    successMsg.style.cssText = "position: fixed; top: 10px; left: 10px; background: #22c55e; color: white; padding: 8px 12px; border-radius: 4px; z-index: 9999;";
-    document.body.appendChild(successMsg);
-    setTimeout(() => successMsg.remove(), 3e3);
-  } catch (err) {
-    state.error = `Upload failed: ${err}`;
-    renderUI();
-  }
+function discardAll() {
+  state.error = null;
+  state.progressText = null;
+  port?.postMessage({ type: "DISCARD_ALL" });
 }
 function renderUI() {
   const statusDot = $("status-dot");
   const statusText = $("status-text");
-  const primaryBtn = $("primary-btn");
-  const stopBtn = $("stop-btn");
-  const exportBtn = $("export-btn");
+  const captureBtn = $("capture-btn");
   const uploadBtn = $("upload-btn");
-  const stats = $("stats");
+  const discardBtn = $("discard-btn");
+  const screensContainer = $("screens-container");
+  const progressEl = $("progress");
   const errorEl = $("error");
-  if (state.recording && !state.paused) {
-    statusDot.className = "status-dot recording";
-    statusText.textContent = "Recording...";
-  } else if (state.paused) {
-    statusDot.className = "status-dot paused";
-    statusText.textContent = "Paused";
+  const demoNameInput = $("demo-name");
+  if (state.capturing) {
+    statusDot.className = "status-dot capturing";
+    statusText.textContent = "Capturing...";
+  } else if (state.screenCount > 0) {
+    statusDot.className = "status-dot ready";
+    statusText.textContent = `${state.screenCount} screen${state.screenCount !== 1 ? "s" : ""} captured`;
   } else {
     statusDot.className = "status-dot idle";
-    statusText.textContent = "Ready";
+    statusText.textContent = "Ready to capture";
   }
-  if (!state.recording && !state.paused) {
-    primaryBtn.textContent = "Start Recording";
-    primaryBtn.className = "btn btn-primary";
-    primaryBtn.onclick = startRecording;
-    primaryBtn.disabled = false;
-  } else if (state.recording && !state.paused) {
-    primaryBtn.textContent = "Pause";
-    primaryBtn.className = "btn btn-warning";
-    primaryBtn.onclick = pauseRecording;
-    primaryBtn.disabled = false;
-  } else if (state.paused) {
-    primaryBtn.textContent = "Resume";
-    primaryBtn.className = "btn btn-primary";
-    primaryBtn.onclick = resumeRecording;
-    primaryBtn.disabled = false;
+  if (!demoNameInput.matches(":focus") && state.demoName && !demoNameInput.value) {
+    demoNameInput.value = state.demoName;
   }
-  stopBtn.disabled = !state.recording && !state.paused;
-  stopBtn.style.opacity = stopBtn.disabled ? "0.4" : "1";
-  stats.textContent = `Events: ${state.eventCount} | Elements: ${state.elementCount}`;
-  exportBtn.style.display = state.hasRecording && !state.recording ? "block" : "none";
-  uploadBtn.style.display = state.hasRecording && !state.recording ? "block" : "none";
+  captureBtn.disabled = state.capturing || !!state.progressText;
+  captureBtn.textContent = state.capturing ? "Capturing..." : state.screenCount > 0 ? "Capture Another Screen" : "Capture This Screen";
+  uploadBtn.disabled = state.screenCount === 0 || state.capturing || !!state.progressText;
+  discardBtn.style.display = state.screenCount > 0 ? "block" : "none";
+  if (state.screensMeta.length === 0) {
+    screensContainer.innerHTML = '<div class="empty-state">No screens captured yet</div>';
+  } else {
+    screensContainer.innerHTML = state.screensMeta.map(
+      (screen, index) => `
+        <div class="screen-item">
+          <div class="screen-info">
+            <div class="screen-name">${escapeHtml(screen.name)}</div>
+            <div class="screen-meta">${formatBytes(screen.sizeBytes)} &middot; ${screen.elementCount} elements</div>
+          </div>
+          <button class="screen-remove" data-index="${index}" title="Remove">&times;</button>
+        </div>
+      `
+    ).join("");
+    screensContainer.querySelectorAll(".screen-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const index = parseInt(btn.dataset.index || "0", 10);
+        removeScreen(index);
+      });
+    });
+  }
+  if (state.progressText) {
+    progressEl.textContent = state.progressText;
+    progressEl.style.display = "block";
+  } else {
+    progressEl.style.display = "none";
+  }
   if (state.error) {
     errorEl.textContent = state.error;
     errorEl.style.display = "block";
@@ -193,21 +145,28 @@ function renderUI() {
     errorEl.style.display = "none";
   }
 }
+function showSuccess(message) {
+  const el = document.createElement("div");
+  el.textContent = message;
+  el.style.cssText = "position: fixed; top: 10px; left: 10px; right: 10px; background: #22c55e; color: white; padding: 8px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; z-index: 9999; text-align: center;";
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3e3);
+}
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-document.addEventListener("DOMContentLoaded", async () => {
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+document.addEventListener("DOMContentLoaded", () => {
   connectToBackground();
-  try {
-    const result = await chrome.storage.local.get("lastRecording");
-    state.hasRecording = !!result.lastRecording;
-  } catch {
-  }
-  $("stop-btn").onclick = stopRecording;
-  $("export-btn").onclick = exportRecording;
-  $("upload-btn").onclick = uploadRecording;
+  $("capture-btn").onclick = captureScreen;
+  $("upload-btn").onclick = finishAndUpload;
+  $("discard-btn").onclick = discardAll;
   renderUI();
 });
 //# sourceMappingURL=popup.js.map

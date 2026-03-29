@@ -4,32 +4,32 @@ import { createServiceClient } from '@/lib/supabase/service';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { recording_id } = body;
+    const { demo_id } = body;
 
-    if (!recording_id) {
+    if (!demo_id) {
       return NextResponse.json(
-        { error: 'Missing required field: recording_id' },
+        { error: 'Missing required field: demo_id' },
         { status: 400 }
       );
     }
 
     const supabase = createServiceClient();
 
-    // Validate the recording exists
-    const { data: recording, error: fetchError } = await supabase
-      .from('recordings')
+    // Validate the demo exists
+    const { data: demo, error: fetchError } = await supabase
+      .from('demos')
       .select('id')
-      .eq('id', recording_id)
+      .eq('id', demo_id)
       .single();
 
-    if (fetchError || !recording) {
+    if (fetchError || !demo) {
       return NextResponse.json(
-        { error: 'Recording not found' },
+        { error: 'Demo not found' },
         { status: 404 }
       );
     }
 
-    // Extract viewer info from request headers
+    // Extract viewer info
     const viewer_ip =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       request.headers.get('x-real-ip') ||
@@ -39,9 +39,9 @@ export async function POST(request: Request) {
 
     // Insert view record
     const { error: insertError } = await supabase
-      .from('recording_views')
+      .from('demo_views')
       .insert({
-        recording_id,
+        demo_id,
         viewer_ip,
         viewer_user_agent,
         referrer,
@@ -55,14 +55,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Increment the view count on the recording
-    const { error: rpcError } = await supabase.rpc('increment_view_count', {
-      p_recording_id: recording_id,
-    });
+    // Increment the view count
+    const { error: rpcError } = await supabase.rpc(
+      'increment_demo_view_count',
+      { p_demo_id: demo_id }
+    );
 
     if (rpcError) {
       console.error('Failed to increment view count:', rpcError);
-      // Don't fail the request — the view was still logged
     }
 
     return NextResponse.json({ success: true });

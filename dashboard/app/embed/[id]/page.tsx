@@ -2,16 +2,15 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import dynamic from 'next/dynamic';
 import { createServiceClient } from '@/lib/supabase/service';
-import { STORAGE_BUCKET } from '@/lib/constants';
 
-const EmbedPlayer = dynamic(
-  () => import('@/components/embed/EmbedPlayer'),
+const DemoPlayer = dynamic(
+  () => import('@/components/embed/DemoPlayer'),
   {
     ssr: false,
     loading: () => (
       <div className="flex h-screen w-screen items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-600" />
           <p className="mt-3 text-sm text-gray-500">Loading demo...</p>
         </div>
       </div>
@@ -19,28 +18,20 @@ const EmbedPlayer = dynamic(
   }
 );
 
-async function getRecording(id: string) {
+async function getDemo(id: string) {
   const supabase = createServiceClient();
 
-  const { data: recording, error } = await supabase
-    .from('recordings')
-    .select('id, name, app_url, metadata, is_active, storage_path')
+  const { data: demo, error } = await supabase
+    .from('demos')
+    .select('id, name, app_url, is_active')
     .eq('id', id)
     .single();
 
-  if (error || !recording || !recording.is_active) {
+  if (error || !demo || !demo.is_active) {
     return null;
   }
 
-  const { data: signedUrlData } = await supabase
-    .storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(recording.storage_path, 300);
-
-  return {
-    ...recording,
-    signed_url: signedUrlData?.signedUrl ?? null,
-  };
+  return demo;
 }
 
 export async function generateMetadata({
@@ -48,16 +39,16 @@ export async function generateMetadata({
 }: {
   params: { id: string };
 }): Promise<Metadata> {
-  const recording = await getRecording(params.id);
+  const demo = await getDemo(params.id);
 
-  if (!recording) {
+  if (!demo) {
     return { title: 'Demo not available | DemoFrame' };
   }
 
-  const title = `${recording.name} | DemoFrame Demo`;
-  const description = recording.app_url
-    ? `Interactive demo of ${recording.app_url} — recorded with DemoFrame`
-    : 'Interactive demo — recorded with DemoFrame';
+  const title = `${demo.name} | DemoFrame Demo`;
+  const description = demo.app_url
+    ? `Interactive demo of ${demo.app_url} — powered by DemoFrame`
+    : 'Interactive demo — powered by DemoFrame';
 
   return {
     title,
@@ -77,17 +68,16 @@ export default async function EmbedPage({
 }: {
   params: { id: string };
 }) {
-  const recording = await getRecording(params.id);
+  const demo = await getDemo(params.id);
 
-  if (!recording || !recording.signed_url) {
+  if (!demo) {
     notFound();
   }
 
   return (
-    <EmbedPlayer
-      signedUrl={recording.signed_url}
-      recordingId={recording.id}
-      recordingName={recording.name}
+    <DemoPlayer
+      demoId={demo.id}
+      demoName={demo.name}
     />
   );
 }

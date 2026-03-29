@@ -1,34 +1,42 @@
-// ── State ──────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────
+
+interface ScreenMeta {
+  name: string;
+  sourceUrl: string;
+  sizeBytes: number;
+  capturedAt: string;
+  elementCount: number;
+}
 
 interface PopupState {
-  recording: boolean;
-  paused: boolean;
-  eventCount: number;
-  elementCount: number;
-  estimatedSize: number;
-  hasRecording: boolean;
+  screenCount: number;
+  capturing: boolean;
+  demoName: string;
+  appUrl: string;
+  screensMeta: ScreenMeta[];
   error: string | null;
+  progressText: string | null;
 }
 
 let state: PopupState = {
-  recording: false,
-  paused: false,
-  eventCount: 0,
-  elementCount: 0,
-  estimatedSize: 0,
-  hasRecording: false,
+  screenCount: 0,
+  capturing: false,
+  demoName: '',
+  appUrl: '',
+  screensMeta: [],
   error: null,
+  progressText: null,
 };
 
 let port: chrome.runtime.Port | null = null;
 
-// ── DOM Elements ───────────────────────────────────────────────────
+// ── DOM Helpers ───────────────────────────────────────────────────
 
 function $(id: string): HTMLElement {
   return document.getElementById(id)!;
 }
 
-// ── Port Connection ────────────────────────────────────────────────
+// ── Port Connection ───────────────────────────────────────────────
 
 function connectToBackground(): void {
   port = chrome.runtime.connect({ name: 'demoframe-popup' });
@@ -36,43 +44,49 @@ function connectToBackground(): void {
   port.onMessage.addListener((msg) => {
     switch (msg.type) {
       case 'STATE_SYNC':
-        state.recording = msg.recording ?? false;
-        state.paused = msg.paused ?? false;
-        state.eventCount = msg.eventCount ?? 0;
-        state.elementCount = msg.elementCount ?? 0;
-        state.estimatedSize = msg.estimatedSize ?? 0;
+        state.screenCount = msg.screenCount ?? 0;
+        state.capturing = msg.capturing ?? false;
+        state.demoName = msg.demoName ?? '';
+        state.appUrl = msg.appUrl ?? '';
+        state.screensMeta = msg.screensMeta ?? [];
         renderUI();
         break;
 
-      case 'STATUS_UPDATE':
-        state.eventCount = msg.eventCount ?? state.eventCount;
-        state.elementCount = msg.elementCount ?? state.elementCount;
-        state.estimatedSize = msg.estimatedSize ?? state.estimatedSize;
+      case 'SCREEN_CAPTURED':
+        state.capturing = false;
+        state.error = null;
+        state.progressText = null;
         renderUI();
         break;
 
-      case 'RECORDING_SAVED':
-        state.recording = false;
-        state.paused = false;
-        state.hasRecording = true;
-        renderUI();
-        // Auto-upload if auth token is available
-        uploadRecording();
-        break;
-
-      case 'SIZE_WARNING':
-        state.error = `Recording is large (${formatBytes(msg.sizeBytes as number)}). Consider stopping soon.`;
+      case 'CAPTURE_PROGRESS':
+        state.progressText = `Capturing: ${msg.phase}${msg.detail ? ` - ${msg.detail}` : ''}...`;
         renderUI();
         break;
 
-      case 'SIZE_LIMIT_REACHED':
-        state.error = 'Size limit reached. Recording auto-stopped.';
-        state.recording = false;
-        state.paused = false;
+      case 'UPLOAD_STARTED':
+        state.progressText = `Uploading... (0/${msg.totalScreens} screens)`;
         renderUI();
+        break;
+
+      case 'UPLOAD_PROGRESS':
+        state.progressText = `Uploading... (${msg.currentScreen}/${msg.totalScreens}) ${msg.screenName}`;
+        renderUI();
+        break;
+
+      case 'UPLOAD_COMPLETE':
+        state.progressText = null;
+        state.error = null;
+        state.screenCount = 0;
+        state.screensMeta = [];
+        state.demoName = '';
+        renderUI();
+        showSuccess(`Demo "${msg.demoName}" uploaded!`);
         break;
 
       case 'ERROR':
+        state.capturing = false;
+        state.progressText = null;
         state.error = msg.error as string;
         renderUI();
         break;
@@ -84,114 +98,33 @@ function connectToBackground(): void {
   });
 }
 
-// ── Actions ────────────────────────────────────────────────────────
+// ── Actions ───────────────────────────────────────────────────────
 
-function startRecording(): void {
+function captureScreen(): void {
   state.error = null;
-  port?.postMessage({ type: 'START_RECORDING' });
+  state.progressText = 'Starting capture...';
+  renderUI();
+  port?.postMessage({ type: 'CAPTURE_SCREEN' });
 }
 
-function pauseRecording(): void {
-  port?.postMessage({ type: 'PAUSE_RECORDING' });
+function removeScreen(index: number): void {
+  port?.postMessage({ type: 'REMOVE_SCREEN', index });
 }
 
-function resumeRecording(): void {
-  port?.postMessage({ type: 'RESUME_RECORDING' });
-}
-
-function stopRecording(): void {
-  port?.postMessage({ type: 'STOP_RECORDING' });
-}
-
-async function exportRecording(): Promise<void> {
-  try {
-    const result = await chrome.storage.local.get('lastRecording');
-    if (!result.lastRecording) {
-      state.error = 'No recording found to export.';
-      renderUI();
-      return;
-    }
-
-    const json = JSON.stringify(result.lastRecording, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `demoframe-${Date.now()}.json`;
-    a.click();
-
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    state.error = `Export failed: ${err}`;
-    renderUI();
+function finishAndUpload(): void {
+  // Send demo name to background before upload
+  const nameInput = $('demo-name') as HTMLInputElement;
+  const name = nameInput.value.trim();
+  if (name) {
+    port?.postMessage({ type: 'SET_DEMO_NAME', name });
   }
+  port?.postMessage({ type: 'FINISH_DEMO' });
 }
 
-async function uploadRecording(): Promise<void> {
-  try {
-    state.error = null;
-    renderUI();
-
-    const result = await chrome.storage.local.get('lastRecording');
-    if (!result.lastRecording) {
-      state.error = 'No recording found to upload.';
-      renderUI();
-      return;
-    }
-
-    // Get auth token from storage
-    const tokenResult = await chrome.storage.local.get('supabaseToken');
-    if (!tokenResult.supabaseToken) {
-      state.error = 'Not authenticated. Please visit the dashboard to authenticate.';
-      renderUI();
-      return;
-    }
-
-    state.error = 'Uploading...';
-    renderUI();
-
-    const recording = result.lastRecording;
-    const response = await fetch('http://localhost:3000/api/recordings/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${tokenResult.supabaseToken}`,
-      },
-      body: JSON.stringify({
-        name: recording.title || `Recording ${new Date().toLocaleString()}`,
-        app_url: recording.url || 'Unknown',
-        recording_data: recording,
-        metadata: recording.metadata || {},
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      if (response.status === 402) {
-        state.error = `Recording limit reached. ${errorData.error}`;
-      } else {
-        state.error = errorData.error || `Upload failed: ${response.statusText}`;
-      }
-      renderUI();
-      return;
-    }
-
-    state.error = null;
-    state.hasRecording = false;
-    await chrome.storage.local.remove('lastRecording');
-    renderUI();
-
-    // Brief success message
-    const successMsg = document.createElement('div');
-    successMsg.textContent = '✓ Uploaded successfully!';
-    successMsg.style.cssText = 'position: fixed; top: 10px; left: 10px; background: #22c55e; color: white; padding: 8px 12px; border-radius: 4px; z-index: 9999;';
-    document.body.appendChild(successMsg);
-    setTimeout(() => successMsg.remove(), 3000);
-  } catch (err) {
-    state.error = `Upload failed: ${err}`;
-    renderUI();
-  }
+function discardAll(): void {
+  state.error = null;
+  state.progressText = null;
+  port?.postMessage({ type: 'DISCARD_ALL' });
 }
 
 // ── Render ─────────────────────────────────────────────────────────
@@ -199,55 +132,79 @@ async function uploadRecording(): Promise<void> {
 function renderUI(): void {
   const statusDot = $('status-dot');
   const statusText = $('status-text');
-  const primaryBtn = $('primary-btn') as HTMLButtonElement;
-  const stopBtn = $('stop-btn') as HTMLButtonElement;
-  const exportBtn = $('export-btn') as HTMLButtonElement;
+  const captureBtn = $('capture-btn') as HTMLButtonElement;
   const uploadBtn = $('upload-btn') as HTMLButtonElement;
-  const stats = $('stats');
+  const discardBtn = $('discard-btn') as HTMLButtonElement;
+  const screensContainer = $('screens-container');
+  const progressEl = $('progress');
   const errorEl = $('error');
+  const demoNameInput = $('demo-name') as HTMLInputElement;
 
   // Status
-  if (state.recording && !state.paused) {
-    statusDot.className = 'status-dot recording';
-    statusText.textContent = 'Recording...';
-  } else if (state.paused) {
-    statusDot.className = 'status-dot paused';
-    statusText.textContent = 'Paused';
+  if (state.capturing) {
+    statusDot.className = 'status-dot capturing';
+    statusText.textContent = 'Capturing...';
+  } else if (state.screenCount > 0) {
+    statusDot.className = 'status-dot ready';
+    statusText.textContent = `${state.screenCount} screen${state.screenCount !== 1 ? 's' : ''} captured`;
   } else {
     statusDot.className = 'status-dot idle';
-    statusText.textContent = 'Ready';
+    statusText.textContent = 'Ready to capture';
   }
 
-  // Primary button
-  if (!state.recording && !state.paused) {
-    primaryBtn.textContent = 'Start Recording';
-    primaryBtn.className = 'btn btn-primary';
-    primaryBtn.onclick = startRecording;
-    primaryBtn.disabled = false;
-  } else if (state.recording && !state.paused) {
-    primaryBtn.textContent = 'Pause';
-    primaryBtn.className = 'btn btn-warning';
-    primaryBtn.onclick = pauseRecording;
-    primaryBtn.disabled = false;
-  } else if (state.paused) {
-    primaryBtn.textContent = 'Resume';
-    primaryBtn.className = 'btn btn-primary';
-    primaryBtn.onclick = resumeRecording;
-    primaryBtn.disabled = false;
+  // Demo name
+  if (!demoNameInput.matches(':focus') && state.demoName && !demoNameInput.value) {
+    demoNameInput.value = state.demoName;
   }
 
-  // Stop button
-  stopBtn.disabled = !state.recording && !state.paused;
-  stopBtn.style.opacity = stopBtn.disabled ? '0.4' : '1';
-
-  // Stats
-  stats.textContent = `Events: ${state.eventCount} | Elements: ${state.elementCount}`;
-
-  // Export button
-  exportBtn.style.display = state.hasRecording && !state.recording ? 'block' : 'none';
+  // Capture button
+  captureBtn.disabled = state.capturing || !!state.progressText;
+  captureBtn.textContent = state.capturing
+    ? 'Capturing...'
+    : state.screenCount > 0
+      ? 'Capture Another Screen'
+      : 'Capture This Screen';
 
   // Upload button
-  uploadBtn.style.display = state.hasRecording && !state.recording ? 'block' : 'none';
+  uploadBtn.disabled = state.screenCount === 0 || state.capturing || !!state.progressText;
+
+  // Discard button
+  discardBtn.style.display = state.screenCount > 0 ? 'block' : 'none';
+
+  // Screen list
+  if (state.screensMeta.length === 0) {
+    screensContainer.innerHTML = '<div class="empty-state">No screens captured yet</div>';
+  } else {
+    screensContainer.innerHTML = state.screensMeta
+      .map(
+        (screen, index) => `
+        <div class="screen-item">
+          <div class="screen-info">
+            <div class="screen-name">${escapeHtml(screen.name)}</div>
+            <div class="screen-meta">${formatBytes(screen.sizeBytes)} &middot; ${screen.elementCount} elements</div>
+          </div>
+          <button class="screen-remove" data-index="${index}" title="Remove">&times;</button>
+        </div>
+      `
+      )
+      .join('');
+
+    // Wire up remove buttons
+    screensContainer.querySelectorAll('.screen-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const index = parseInt((btn as HTMLElement).dataset.index || '0', 10);
+        removeScreen(index);
+      });
+    });
+  }
+
+  // Progress
+  if (state.progressText) {
+    progressEl.textContent = state.progressText;
+    progressEl.style.display = 'block';
+  } else {
+    progressEl.style.display = 'none';
+  }
 
   // Error
   if (state.error) {
@@ -258,29 +215,35 @@ function renderUI(): void {
   }
 }
 
+function showSuccess(message: string): void {
+  const el = document.createElement('div');
+  el.textContent = message;
+  el.style.cssText =
+    'position: fixed; top: 10px; left: 10px; right: 10px; background: #22c55e; color: white; padding: 8px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; z-index: 9999; text-align: center;';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// ── Init ───────────────────────────────────────────────────────────
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
-document.addEventListener('DOMContentLoaded', async () => {
+// ── Init ──────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
   connectToBackground();
 
-  // Check if there's an existing recording for export
-  try {
-    const result = await chrome.storage.local.get('lastRecording');
-    state.hasRecording = !!result.lastRecording;
-  } catch {
-    // Ignore
-  }
-
-  // Wire up buttons
-  $('stop-btn').onclick = stopRecording;
-  $('export-btn').onclick = exportRecording;
-  $('upload-btn').onclick = uploadRecording;
+  $('capture-btn').onclick = captureScreen;
+  $('upload-btn').onclick = finishAndUpload;
+  $('discard-btn').onclick = discardAll;
 
   renderUI();
 });

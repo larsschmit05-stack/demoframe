@@ -10,9 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "rrweb": "^2.0.0-alpha.17"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/chrome": "^0.0.268",
     "typescript": "^5.4.5",
